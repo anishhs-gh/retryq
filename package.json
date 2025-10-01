@@ -1,0 +1,35 @@
+{
+  "name": "@anishhs/retryq",
+  "version": "1.0.0",
+  "description": "Retry manager for handling multiple concurrent jobs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": [
+    "retryq",
+    "retry",
+    "queue",
+    "manager",
+    "priority",
+    "jobs",
+    "asynchronous",
+    "concurrent",
+    "typescript",
+    "anishhs"
+  ],
+  "author": "Anish Shekh",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^24.6.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
