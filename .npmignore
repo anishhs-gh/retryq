@@ -1,0 +1,43 @@
+# Test files
+test-*.js
+*.test.js
+*.spec.js
+__tests__/
+tests/
+
+# Reports and analysis
+reports/
+PRODUCTION_REVIEW.md
+CRITICAL_FIXES.md
+VERIFICATION_FINDINGS.md
+FINAL_VERIFICATION.md
+TEST_RESULTS.md
+FORCE_CANCELLATION.md
+
+# Requirements
+requirements.txt
+
+# Development files
+src/
+tsconfig.json
+.vscode/
+.github/
+
+# Git
+.git/
+.gitignore
+
+# Editor
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Only include dist/ in published package
