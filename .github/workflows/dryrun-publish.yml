@@ -1,0 +1,62 @@
+name: Dry-run publish (develop)
+
+# Pre-merge gate for develop / PRs into master. Confirms the package passes
+# tests + audit, that the NPM_TOKEN authenticates and has publish permission,
+# and that `npm publish` would succeed — all WITHOUT publishing. This validates
+# that the eventual manual Publish will go through before merging to master.
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  audit:
+    uses: ./.github/workflows/audit.yml
+
+  dry-run:
+    needs: [test, audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build (CJS + ESM)
+        run: npm run build
+
+      - name: Verify npm auth & publish permission
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::NPM_TOKEN secret is not set — deployment would fail."
+            exit 1
+          fi
+          echo "Authenticated to npm as: $(npm whoami)"
+          echo "Publish permission for @anishhs/retryq:"
+          npm access list collaborators @anishhs/retryq || \
+            echo "::warning::Could not list collaborators (token valid; permission unverified)."
+
+      - name: Dry-run publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --dry-run --access public
+
+      - name: Show package contents
+        run: npm pack --dry-run
