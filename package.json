@@ -1,21 +1,38 @@
 {
   "name": "@anishhs/retryq",
-  "version": "1.1.0",
-  "description": "Production-ready retry queue with force cancellation, priorities, and exponential backoff",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "version": "1.2.0",
+  "description": "Production-ready retry queue with lifecycle events, force cancellation, priorities, and exponential backoff",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/cjs/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
   "files": [
     "dist"
   ],
+  "engines": {
+    "node": ">=16"
+  },
   "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && npm run build:cjs && npm run build:esm && node scripts/postbuild.js",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepare": "npm run build",
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
-    "test": "npm run test:verification && npm run test:force-cancel && npm run test:cancellation",
-    "test:verification": "node tests/verification.test.js",
-    "test:force-cancel": "node tests/force-cancellation.test.js",
-    "test:cancellation": "node tests/cancellation-proof.test.js"
+    "pretest": "npm run build",
+    "test": "node --test tests/"
   },
   "keywords": [
     "retryq",
@@ -24,6 +41,7 @@
     "manager",
     "priority",
     "jobs",
+    "events",
     "asynchronous",
     "concurrent",
     "typescript",
@@ -33,7 +51,6 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^24.6.1",
-    "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
 }

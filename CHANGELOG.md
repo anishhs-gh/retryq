@@ -2,6 +2,62 @@
 
 All notable changes to @anishhs/retryq will be documented in this file.
 
+## [1.2.0] - 2026-06-26
+
+### Added
+
+- **Lifecycle events** — `RetryQManager` now extends `EventEmitter` and emits
+  typed `retry`, `success`, `failure`, `cancel`, and `idle` events.
+- **Per-job callbacks** — `onRetry`, `onSuccess`, `onFailure`, and `onCancel`
+  options on `createJob`.
+- **`shouldRetry(error, attempt)` predicate** — return `false` to stop retrying
+  a non-retryable error immediately.
+- **`onIdle()` / `drain()`** — await a promise that resolves when the queue is
+  fully idle (no pending or running jobs).
+- **`maxDelay`** — cap the per-retry backoff delay.
+- **`attemptTimeout`** — bound a single attempt; it is aborted and retried if it
+  exceeds the limit.
+- **Generic typing** — `createJob<T>()` returns `RetryQJob<T>` so `job.promise`
+  and `onSuccess` are properly typed.
+- **`cancelled` group** in `listJobs()` and dedicated cancelled history.
+- **Dual ESM + CJS build** with an `exports` map; added `engines: node >=16`.
+
+### Fixed
+
+- **`maxTime` is now enforced during execution.** Previously it only prevented
+  *new* attempts after the budget elapsed; a single long attempt could run past
+  it. Each attempt is now bounded by `min(attemptTimeout, remaining maxTime)`
+  and aborted (raising `RetryQTimeoutError`) when exceeded.
+- **Cancelled jobs no longer appear under `failed`.** They are tracked in a
+  dedicated `cancelled` bucket and surfaced via `listJobs().cancelled`.
+  *(Behavior change in `listJobs()` output.)*
+- **External `AbortSignal` listeners are removed** when a job settles, avoiding a
+  slow listener leak for long-lived shared signals.
+
+### Changed
+
+- Source restructured from a single `src/index.ts` into focused modules
+  (`types`, `utils`, `validation`, `manager`, plus an `index` barrel).
+- Tests migrated to the built-in `node:test` runner.
+- TypeScript `target` raised to ES2020.
+
+### CI/CD
+
+- Split CI into reusable **Test** and **Audit** workflows (run on `develop`,
+  `master`, and PRs).
+- Added a **Dry-run publish** workflow (`develop` / PRs) that is gated on Test +
+  Audit and verifies the `NPM_TOKEN` authenticates and has publish permission —
+  catching deploy problems before merging to `master`.
+- Publishing is now a **manual** workflow (`workflow_dispatch`), gated on Test +
+  Audit, that publishes to npm and creates a GitHub Release with a version tag.
+  The previous auto-publish-on-`master` workflow was removed.
+
+### Migration
+
+No breaking API changes. New options and events are additive. Note the two
+behavior fixes above: `listJobs().cancelled` now holds cancelled jobs (they no
+longer show under `failed`), and `maxTime` actively bounds in-flight attempts.
+
 ## [1.1.0] - 2025-12-31
 
 ### Added - Force Cancellation Feature

@@ -10,15 +10,18 @@ A production-ready, zero-dependency retry queue manager for Node.js with support
 
 - ✅ **Concurrency control** - Limit concurrent job execution
 - ✅ **Priority queue** - Higher priority jobs execute first
-- ✅ **Exponential backoff** with configurable delay, multiplier, and jitter
+- ✅ **Exponential backoff** with configurable delay, multiplier, `maxDelay`, and jitter
+- ✅ **Lifecycle events & hooks** - `retry`/`success`/`failure`/`cancel`/`idle` events + per-job callbacks
+- ✅ **Conditional retries** - `shouldRetry(error, attempt)` predicate to skip non-retryable errors
 - ✅ **Force cancellation** - Abort in-progress jobs with AbortController
 - ✅ **Cooperative cancellation** - Graceful job termination
+- ✅ **Real time limits** - `maxTime` (and `attemptTimeout`) actively abort in-flight attempts
+- ✅ **Queue draining** - `onIdle()` / `drain()` to await all work
 - ✅ **Memory safe** - Bounded job history with LRU eviction
-- ✅ **Time limits** - Global timeout per job with `maxTime`
 - ✅ **Job introspection** - List, find, and track jobs by ID or label
-- ✅ **TypeScript** - Full type safety with bundled declarations
+- ✅ **TypeScript** - Generic, fully-typed API with bundled declarations
+- ✅ **Dual ESM + CJS** - Ships both module formats with an `exports` map
 - ✅ **Zero dependencies** - Minimal footprint, no external packages
-- ✅ **Production tested** - 50+ tests covering all features
 
 ## Installation
 
@@ -264,6 +267,68 @@ retryQ.clearHistory('completed');
 
 // Clear all history
 retryQ.clearHistory();
+```
+
+---
+
+#### onIdle() / drain()
+
+```typescript
+onIdle(): Promise<void>
+drain(): Promise<void>   // alias
+```
+
+Resolves when the queue is fully idle (no pending **and** no running jobs).
+Resolves immediately if already idle.
+
+```typescript
+for (const item of items) {
+  retryQ.createJob(() => process(item), { retries: 3 });
+}
+await retryQ.onIdle(); // wait for the whole batch to settle
+```
+
+---
+
+### Events
+
+`RetryQManager` extends Node's `EventEmitter` and emits typed events:
+
+```typescript
+retryQ.on('retry',   ({ job, info })   => console.log(`retry #${info.attempt} in ${info.nextDelay}ms`));
+retryQ.on('success', ({ job, result }) => console.log('done', job.label));
+retryQ.on('failure', ({ job, error })  => console.error('failed', job.label, error));
+retryQ.on('cancel',  ({ job })         => console.log('cancelled', job.label));
+retryQ.on('idle',    ()                => console.log('queue drained'));
+```
+
+| Event | Payload | Fired when |
+|-------|---------|-----------|
+| `retry` | `{ job, info: RetryInfo }` | A failed attempt schedules another try |
+| `success` | `{ job, result }` | A job completes successfully |
+| `failure` | `{ job, error }` | A job fails terminally |
+| `cancel` | `{ job }` | A job is cancelled |
+| `idle` | _(none)_ | The queue transitions to fully idle |
+
+Prefer per-job feedback? Use the `onRetry` / `onSuccess` / `onFailure` /
+`onCancel` callbacks in `RetryQJobOptions`.
+
+---
+
+### Conditional Retries
+
+Skip retries for errors that will never succeed:
+
+```typescript
+retryQ.createJob(async (signal) => {
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw Object.assign(new Error('HTTP'), { status: res.status });
+  return res.json();
+}, {
+  retries: 5,
+  // Retry 5xx and network errors; give up on 4xx immediately.
+  shouldRetry: (err) => !(err?.status >= 400 && err?.status < 500),
+});
 ```
 
 ---
@@ -525,15 +590,26 @@ process.on('SIGTERM', async () => {
 ### RetryQJobOptions
 
 ```typescript
-type RetryQJobOptions = {
-  retries?: number;      // Number of retry attempts (default: 3)
-  delay?: number;        // Initial delay in ms (default: 1000)
-  backoff?: number;      // Delay multiplier (default: 2)
-  maxTime?: number;      // Total time limit in ms (default: 30000)
-  jitter?: number;       // Jitter fraction 0-1 (default: 0.1)
-  label?: string;        // Human-readable identifier (default: job ID)
-  priority?: number;     // Execution priority (default: 1)
-  signal?: AbortSignal;  // External abort signal (optional)
+type RetryQJobOptions<T = unknown> = {
+  retries?: number;        // Number of retry attempts (default: 3)
+  delay?: number;          // Initial delay in ms (default: 1000)
+  backoff?: number;        // Delay multiplier (default: 2)
+  maxTime?: number;        // Total time limit in ms (default: 30000)
+  maxDelay?: number;       // Cap for a single backoff delay (default: Infinity)
+  attemptTimeout?: number; // Per-attempt timeout in ms (default: Infinity)
+  jitter?: number;         // Jitter fraction 0-1 (default: 0.1)
+  label?: string;          // Human-readable identifier (default: job ID)
+  priority?: number;       // Execution priority (default: 1)
+  signal?: AbortSignal;    // External abort signal (optional)
+
+  // Conditional retry: return false to stop retrying immediately
+  shouldRetry?: (error: unknown, attempt: number) => boolean;
+
+  // Per-job lifecycle callbacks
+  onRetry?: (info: RetryInfo) => void;
+  onSuccess?: (result: T) => void;
+  onFailure?: (error: unknown) => void;
+  onCancel?: () => void;
 };
 ```
 
@@ -544,7 +620,9 @@ type RetryQJobOptions = {
 | `retries` | `3` | Number of retry attempts after initial try |
 | `delay` | `1000` | Initial delay between retries (ms) |
 | `backoff` | `2` | Multiplier for exponential backoff |
-| `maxTime` | `30000` | Total execution time limit (30s) |
+| `maxTime` | `30000` | Total execution time limit (30s), enforced during attempts |
+| `maxDelay` | `Infinity` | Cap for a single backoff delay (ms) |
+| `attemptTimeout` | `Infinity` | Per-attempt timeout (ms) |
 | `jitter` | `0.1` | Random delay variation (±10%) |
 | `priority` | `1` | Queue priority (higher = sooner) |
 | `maxConcurrent` | `Infinity` | Concurrent job limit |
@@ -643,6 +721,19 @@ throw new Error('API request failed');
 ---
 
 ## Migration Guide
+
+### From v1.1.x to v1.2.x
+
+**No breaking API changes.** All existing code keeps working; new options,
+callbacks, events, and methods are additive. Two behavior fixes to be aware of:
+
+- `listJobs().cancelled` now holds cancelled jobs — they no longer appear under
+  `failed`.
+- `maxTime` now actively aborts an in-flight attempt once the budget is
+  exhausted (previously it only blocked starting a new attempt).
+
+The package now ships **both ESM and CJS** with an `exports` map; `import` and
+`require` both resolve automatically.
 
 ### From v1.0.x to v1.1.x
 
@@ -763,7 +854,7 @@ async (signal) => {
 ## FAQ
 
 **Q: Is this production-ready?**
-A: Yes! Tested with 50+ comprehensive tests. Score: 9.5/10
+A: Yes — covered by a `node:test` suite spanning concurrency, cancellation, events, timeouts, and retry semantics.
 
 **Q: Does it work with TypeScript?**
 A: Yes, full TypeScript support with bundled type definitions.
@@ -788,13 +879,43 @@ More examples available at: [github.com/anishhs-gh/retryq-examples](https://gith
 
 ---
 
+## Development
+
+```bash
+npm install        # install dev dependencies
+npm run typecheck  # tsc --noEmit
+npm run build      # emit dual ESM + CJS into dist/ (with .d.ts)
+npm test           # build (pretest) then run node:test suite
+```
+
+The package builds to both module formats:
+
+- CommonJS → `dist/cjs` (`require`)
+- ES modules → `dist/esm` (`import`)
+
+resolved automatically via the `exports` map in `package.json`.
+
+## CI / Release
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| **Test** | push/PR to `develop`/`master` | Typecheck, build, and test on Node 16/18/20 |
+| **Audit** | push/PR + weekly | `npm audit` of production dependencies |
+| **Dry-run publish** | push to `develop`, PRs | Gated on Test + Audit; verifies the npm token authenticates and has publish permission, and that `npm publish` would succeed — without publishing |
+| **Publish (manual)** | `workflow_dispatch` | Gated on Test + Audit; publishes to npm and creates a GitHub Release + version tag |
+
+Releases are **manual**: bump the version in `package.json`, merge to `master`,
+then run the **Publish** workflow from the Actions tab. Requires an `NPM_TOKEN`
+repository secret with publish access to the `@anishhs` scope.
+
 ## Contributing
 
 Contributions welcome! Please:
 1. Fork the repository
-2. Create a feature branch
-3. Add tests for new features
-4. Submit a pull request
+2. Create a feature branch (off `develop`)
+3. Add tests for new features (`tests/*.test.js`, `node:test`)
+4. Ensure `npm test` passes
+5. Submit a pull request into `develop`
 
 ---
 
@@ -813,7 +934,9 @@ See [CHANGELOG.md](./CHANGELOG.md) for version history.
 ## Support
 
 - **Issues**: [GitHub Issues](https://github.com/anishhs-gh/retryq/issues)
-- **Email**: anishsh701@gmail.com
+- **GitHub**: [anishhs-gh](https://github.com/anishhs-gh)
+- **Website**: [anishhs.com](https://anishhs.com)
+- **LinkedIn**: [linkedin.com/in/anishsh](https://linkedin.com/in/anishsh)
 
 ---
 

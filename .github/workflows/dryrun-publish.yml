@@ -1,0 +1,82 @@
+name: Dry-run publish (develop)
+
+# Pre-merge gate for develop / PRs into master. Confirms the package passes
+# tests + audit, that the NPM_TOKEN authenticates and has publish permission,
+# and that `npm publish` would succeed — all WITHOUT publishing. This validates
+# that the eventual manual Publish will go through before merging to master.
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - master
+  workflow_dispatch:
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  audit:
+    uses: ./.github/workflows/audit.yml
+
+  dry-run:
+    needs: [test, audit]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build (CJS + ESM)
+        run: npm run build
+
+      - name: Verify npm auth & publish permission
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${NODE_AUTH_TOKEN:-}" ]; then
+            echo "::error::NPM_TOKEN secret is not set — publishing would fail."
+            exit 1
+          fi
+
+          # Hard-fail on auth errors. Run whoami as its own command so a non-zero
+          # exit fails the step (a command substitution inside echo would not).
+          if ! whoami_out="$(npm whoami 2>npm_err)"; then
+            cat npm_err
+            echo "::error::npm authentication failed — NPM_TOKEN is invalid or expired. Publishing would fail."
+            exit 1
+          fi
+          echo "Authenticated to npm as: $whoami_out"
+
+          # Confirm this account actually has read-write (publish) access.
+          if ! npm access list collaborators @anishhs/retryq --json > collabs.json 2>npm_err; then
+            cat npm_err
+            echo "::error::Could not read collaborators for @anishhs/retryq — cannot confirm publish permission."
+            exit 1
+          fi
+          perm="$(node -e 'const fs=require("fs");const c=JSON.parse(fs.readFileSync("collabs.json","utf8"));process.stdout.write(c[process.argv[1]]||"none")' "$whoami_out")"
+          echo "Publish permission for $whoami_out: $perm"
+          case "$perm" in
+            *write*) echo "Publish permission confirmed." ;;
+            *) echo "::error::$whoami_out lacks read-write (publish) access to @anishhs/retryq."; exit 1 ;;
+          esac
+
+      - name: Dry-run publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --dry-run --access public
+
+      - name: Show package contents
+        run: npm pack --dry-run
