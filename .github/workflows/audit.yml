@@ -30,7 +30,7 @@ jobs:
           node-version: '20'
 
       - name: Generate lockfile
-        run: npm install --package-lock-only
+        run: npm install --package-lock-only --ignore-scripts
 
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
