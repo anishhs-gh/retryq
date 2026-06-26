@@ -1,0 +1,43 @@
+name: Test
+
+# Reusable + standalone test workflow. Runs on develop/master and PRs, and is
+# called by the dry-run and deploy workflows so they share one source of truth.
+
+on:
+  push:
+    branches:
+      - develop
+      - master
+  pull_request:
+    branches:
+      - develop
+      - master
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['16', '18', '20']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build (CJS + ESM)
+        run: npm run build
+
+      - name: Test
+        run: npm test
